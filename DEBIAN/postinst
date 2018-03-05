@@ -1,0 +1,152 @@
+#!/bin/bash
+
+PMS_LIB_DIR=/usr/lib/plexmediaserver
+PMS_DOWNLOAD_DIR=/tmp/plex_tmp_download	
+
+get_pms_build(){
+
+	local cpuinfo=$(grep -i features /proc/cpuinfo)
+	local cpuarch=$(grep -i architecture /proc/cpuinfo | cut -d' ' -f3 | head -n1)
+
+	local bios_board_vendor=""
+	if [[ -e /sys/class/dmi/id/board_vendor ]]; then
+		bios_board_vendor=$(cat /sys/class/dmi/id/board_vendor)
+	elif [[ -e /sys/devices/virtual/dmi/id/board_vendor ]]; then
+		bios_board_vendor=$(cat /sys/devices/virtual/dmi/id/board_vendor)
+	fi
+
+	if [[ $bios_board_vendor == "AMD" ]]; then
+		echo "synology"
+	elif [[ $cpuinfo =~ .*neon.* ]] && [[ $cpuinfo =~ .*vfpv4.* ]] && [[ $cpuinfo =~ .*thumb.* ]] && [[ $cpuinfo =~ .*idiva.* ]]; then
+		echo "netgear"		
+	elif [[ $cpuarch == "8" ]]; then
+		echo "netgear"
+	else
+		echo "synology"
+	fi
+}
+
+install_netgear(){
+
+	local PMS_URL='https://downloads.plex.tv/plex-media-server/1.12.0.4829-6de959918/plexmediaserver-ros6-binaries-annapurna_1.12.0.4829-6de959918_armel.deb'
+	local PMS_HASH='4f9b07b8c52cda1b34e0c6d9d3fa60a4fa99e548'
+
+	echo "Downloading readynas package ..."
+	cd $PMS_DOWNLOAD_DIR	
+	curl --progress-bar -o readynas.deb $PMS_URL
+
+#local PMS_DOWNLOAD_HASH=`sha256sum readynas.deb | cut -d' ' -f1`
+
+#if [ "$PMS_HASH" != "$PMS_DOWNLOAD_HASH" ]
+#then
+#	echo "Checksum mismatch. Downloaded file does not match this package."
+#	exit 1
+#else
+#	echo "Passed checksum test."
+#fi
+
+	echo "Extracting readynas.deb ..."
+        dpkg-deb --fsys-tarfile readynas.deb | tar -xf - -C $PMS_LIB_DIR/ --strip-components=4 ./apps/plexmediaserver-annapurna/Binaries
+
+	# remove not used files
+	rm $PMS_LIB_DIR/config.xml
+	
+}
+
+install_synology(){
+
+	local PMS_URL='https://downloads.plex.tv/plex-media-server/1.11.3.4803-c40bba82e/PlexMediaServer-1.11.3.4803-c40bba82e-arm7.spk'
+	local PMS_HASH='69022e1c82907740570c5221cece339782c433aac21b760482357040afdd1657'
+
+	echo "Downloading synology package ..."
+	cd $PMS_DOWNLOAD_DIR	
+	curl --progress-bar -o synology.tar $PMS_URL
+
+	local PMS_DOWNLOAD_HASH=`sha256sum synology.tar | cut -d' ' -f1`
+
+	if [ "$PMS_HASH" != "$PMS_DOWNLOAD_HASH" ]
+	then
+		echo "Checksum mismatch. Downloaded file does not match this package."
+		exit 1
+	else
+		echo "Passed checksum test."
+	fi
+
+	echo "Extracting synology.tar ..."
+        tar -xOf synology.tar package.tgz | tar -xzf - -C $PMS_LIB_DIR/
+
+	# remove not used files
+	rm -r $PMS_LIB_DIR/dsm_config
+}
+
+
+case "$1" in
+    configure)
+	adduser --quiet --system --shell /bin/bash --home /var/lib/plexmediaserver --group plex
+
+	# fix missing plex group in the old package
+	addgroup --quiet --system plex
+	usermod -g plex plex &> /dev/null
+
+	# create dirs 
+	mkdir -p $PMS_DOWNLOAD_DIR	
+	mkdir -p $PMS_LIB_DIR
+
+	pmsbuild=$(get_pms_build)
+
+	if [[ $pmsbuild == "netgear" ]]; then
+		install_netgear
+	else
+		install_synology
+	fi
+
+	# remove tmp data
+	cd /tmp
+	rm -r $PMS_DOWNLOAD_DIR/
+
+	# Ensure we load the udevrule and trigger for any already inserted USB device
+	if [ -f /sbin/udevadm ]; then
+	  udevadm control --reload-rules || :
+	  udevadm trigger
+	else
+	  echo
+	  echo "##################################################################"
+	  echo "#  NOTE: Your system does not have udev installed. Without udev  #"
+	  echo "#        you won't be able to use DVBLogic's TVButler for DVR    #"
+	  echo "#        or for LiveTV                                           #"
+	  echo "#                                                                #"
+	  echo "#        Please install udev and reinstall Plex Media Server to  #"
+	  echo "#        to enable TV Butler support in Plex Media Server.       #"
+	  echo "#                                                                #"
+	  echo "#        To install udev run: sudo apt-get install udev          #"
+	  echo "#                                                                #"
+	  echo "##################################################################"
+	  echo
+	fi
+
+	if [ -f /proc/1/comm ]; then
+	  if [ "`cat /proc/1/comm`" = "systemd" ]; then
+	    # Initiate config consolidation and pull overrides into the correct location.
+	    if [ -f /etc/default/plexmediaserver ]; then
+	      /usr/lib/plexmediaserver/MigratePlexServerConfig.sh
+	    fi
+	    systemctl daemon-reload
+	    systemctl enable plexmediaserver
+	    systemctl start plexmediaserver
+	  else
+	    update-rc.d plexmediaserver defaults
+	    /etc/init.d/plexmediaserver start
+	  fi
+	fi
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0
