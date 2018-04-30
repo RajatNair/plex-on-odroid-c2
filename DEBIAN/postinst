@@ -28,8 +28,10 @@ get_pms_build(){
 
 install_netgear(){
 
-	local PMS_URL='https://downloads.plex.tv/plex-media-server/1.12.0.4829-6de959918/plexmediaserver-ros6-binaries-annapurna_1.12.0.4829-6de959918_armel.deb'
-	local PMS_HASH='4f9b07b8c52cda1b34e0c6d9d3fa60a4fa99e548'
+	# Plex Media Server for Netgear
+	# ARM 6.x RN2xx
+	local PMS_URL='https://downloads.plex.tv/plex-media-server/1.13.0.5003-8fcb5b6e5/plexmediaserver-ros6-binaries-annapurna_1.13.0.5003-8fcb5b6e5_armel.deb'
+	local PMS_HASH='8dce11c15a2232a1abd7b790b3586725b7742c25'
 
 	echo "Downloading readynas package ..."
 	cd $PMS_DOWNLOAD_DIR	
